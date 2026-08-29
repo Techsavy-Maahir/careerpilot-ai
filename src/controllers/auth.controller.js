@@ -1,6 +1,7 @@
 const userModel = require('../models/user.model');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const tokenBlacklistModel = require('../models/blacklist.models');
 /* 
     @name registerUserController
     @desc Register a new user,expects username and email in the request body
@@ -22,12 +23,13 @@ if(isUserAlreadyExists) {
 }
 
 const hash = await bcrypt.hash(password, 10);
-const user = await new userModel({
+const user = new userModel({
     username,
     email,
     password: hash
 
 });
+await user.save();
 
 const token = jwt.sign({id: user._id, username: user.username}, process.env.JWT_SECRET, {expiresIn: '1d'});
 
@@ -73,7 +75,38 @@ async function loginUserController(req, res) {
     });
 }
 
+async function logoutUserController(req, res) {
+    try {
+        const token = req.cookies.token;
+
+        if (!token) {
+            return res.status(401).json({
+                message: "No token found"
+            });
+        }
+
+        await tokenBlacklistModel.create({
+            token: token
+        });
+
+        res.clearCookie("token");
+
+        return res.status(200).json({
+            message: "Logout successful"
+        });
+
+    } catch (error) {
+        console.error("Logout error:", error);
+
+        return res.status(500).json({
+            message: "Logout failed",
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
     registerUserController,
-    loginUserController
+    loginUserController,
+    logoutUserController
 }
