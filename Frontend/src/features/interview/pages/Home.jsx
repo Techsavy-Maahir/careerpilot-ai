@@ -8,14 +8,43 @@ const Home = () => {
     const { loading, generateReport,reports } = useInterview()
     const [ jobDescription, setJobDescription ] = useState("")
     const [ selfDescription, setSelfDescription ] = useState("")
+    const [ resumeFileName, setResumeFileName ] = useState("")
+    const [ error, setError ] = useState("")
     const resumeInputRef = useRef()
 
     const navigate = useNavigate()
 
+    const handleResumeChange = (event) => {
+        const file = event.target.files?.[ 0 ]
+        setResumeFileName(file?.name || "")
+        setError("")
+    }
+
     const handleGenerateReport = async () => {
-        const resumeFile = resumeInputRef.current.files[ 0 ]
-        const data = await generateReport({ jobDescription, selfDescription, resumeFile })
-        navigate(`/interview/${data._id}`)
+        const resumeFile = resumeInputRef.current?.files?.[ 0 ]
+
+        if (!jobDescription.trim()) {
+            setError("Please paste a job description.")
+            return
+        }
+
+        if (!resumeFile && !selfDescription.trim()) {
+            setError("Upload a PDF resume or add a self description.")
+            return
+        }
+
+        if (resumeFile && resumeFile.type !== "application/pdf") {
+            setError("Only PDF resumes are supported.")
+            return
+        }
+
+        try {
+            setError("")
+            const data = await generateReport({ jobDescription, selfDescription, resumeFile })
+            navigate(`/interview/${data._id}`)
+        } catch (err) {
+            setError(err.message)
+        }
     }
 
     if (loading) {
@@ -79,9 +108,9 @@ const Home = () => {
                                 <span className='dropzone__icon'>
                                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" /></svg>
                                 </span>
-                                <p className='dropzone__title'>Click to upload or drag &amp; drop</p>
-                                <p className='dropzone__subtitle'>PDF or DOCX (Max 5MB)</p>
-                                <input ref={resumeInputRef} hidden type='file' id='resume' name='resume' accept='.pdf,.docx' />
+                                <p className='dropzone__title'>{resumeFileName || "Click to upload or drag & drop"}</p>
+                                <p className='dropzone__subtitle'>PDF only (Max 3MB)</p>
+                                <input ref={resumeInputRef} hidden type='file' id='resume' name='resume' accept='.pdf,application/pdf' onChange={handleResumeChange} />
                             </label>
                         </div>
 
@@ -112,7 +141,9 @@ const Home = () => {
 
                 {/* Card Footer */}
                 <div className='interview-card__footer'>
-                    <span className='footer-info'>AI-Powered Strategy Generation &bull; Approx 30s</span>
+                    <span className='footer-info'>
+                        {error ? <span style={{ color: "#f87171" }}>{error}</span> : "AI-Powered Strategy Generation • Approx 30s"}
+                    </span>
                     <button
                         onClick={handleGenerateReport}
                         className='generate-btn'>

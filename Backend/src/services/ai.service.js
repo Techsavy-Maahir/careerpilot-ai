@@ -2,10 +2,42 @@ const { GoogleGenAI } = require("@google/genai")
 const { z } = require("zod")
 const { zodToJsonSchema } = require("zod-to-json-schema")
 const puppeteer = require("puppeteer")
+const { renderResumeHtml } = require("../templates/resume.template")
 
 const ai = new GoogleGenAI({
     apiKey: process.env.GOOGLE_GENAI_API_KEY
 })
+
+const AI_MODELS = [ "gemini-3.5-flash-lite" ]
+
+async function generateStructuredContent({ prompt, schema }) {
+    let lastError = null
+
+    for (const model of AI_MODELS) {
+        try {
+            const response = await ai.models.generateContent({
+                model,
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: zodToJsonSchema(schema),
+                }
+            })
+
+            return JSON.parse(response.text)
+        } catch (err) {
+            lastError = err
+            const isRetryable = err?.status === 503 || err?.status === 429
+            if (!isRetryable) {
+                throw err
+            }
+        }
+    }
+
+    const error = new Error(lastError?.message || "AI service is temporarily unavailable. Please try again.")
+    error.status = 503
+    throw error
+}
 
 
 const interviewReportSchema = z.object({
@@ -16,10 +48,15 @@ const interviewReportSchema = z.object({
         answer: z.string().describe("How to answer this question, what points to cover, what approach to take etc.")
     })).describe("Technical questions that can be asked in the interview along with their intention and how to answer them"),
     behavioralQuestions: z.array(z.object({
-        question: z.string().describe("The technical question can be asked in the interview"),
+        question: z.string().describe("The behavioral question can be asked in the interview"),
         intention: z.string().describe("The intention of interviewer behind asking this question"),
         answer: z.string().describe("How to answer this question, what points to cover, what approach to take etc.")
     })).describe("Behavioral questions that can be asked in the interview along with their intention and how to answer them"),
+    hrQuestions: z.array(z.object({
+        question: z.string().describe("The HR question that can be asked in the interview"),
+        intention: z.string().describe("The intention of interviewer behind asking this HR question"),
+        answer: z.string().describe("How to answer this question, what points to cover, what approach to take etc.")
+    })).describe("HR questions (salary expectations, notice period/availability, career goals, relocation, motivation, reason for leaving) along with intention and answer"),
     skillGaps: z.array(z.object({
         skill: z.string().describe("The skill which the candidate is lacking"),
         severity: z.enum([ "low", "medium", "high" ]).describe("The severity of this skill gap, i.e. how important is this skill for the job and how much it can impact the candidate's chances")
@@ -36,29 +73,37 @@ async function generateInterviewReport({ resume, selfDescription, jobDescription
 
 
     const prompt = `Generate an interview report for a candidate with the following details:
-                        Resume: ${resume}
-                        Self Description: ${selfDescription}
+                        Resume: ${resume || "Not provided"}
+                        Self Description: ${selfDescription || "Not provided"}
                         Job Description: ${jobDescription}
+
+                    Detailed Requirements:
+                    1. Technical Questions (generate at least 15 questions):
+                       - Must be directly relevant to the Job Description.
+                       - Include questions specifically based on projects, technologies, frameworks, and skills actually present in the candidate's Resume or Self Description (do NOT invent experience not present).
+                       - Include a mix of conceptual, practical, and scenario-based technical questions.
+                    2. Behavioral Questions (generate at least 8 questions):
+                       - Focus on teamwork, communication, conflict resolution, leadership, handling failure/challenges, and adaptability.
+                    3. HR Questions (generate at least 5 questions):
+                       - Cover HR-specific topics including salary expectations, availability / notice period, short-term and long-term career goals, company motivation, reason for job change, and work preferences.
+                    4. General Rules:
+                       - Ensure questions are not repetitive across categories.
+                       - Each question must include an intention and a structured model answer.
 `
 
-    const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: zodToJsonSchema(interviewReportSchema),
-        }
+    return generateStructuredContent({
+        prompt,
+        schema: interviewReportSchema
     })
-
-    return JSON.parse(response.text)
-
-
 }
 
 
 
 async function generatePdfFromHtml(htmlContent) {
-    const browser = await puppeteer.launch()
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: [ "--no-sandbox", "--disable-setuid-sandbox" ]
+    })
     const page = await browser.newPage();
     await page.setContent(htmlContent, { waitUntil: "networkidle0" })
 
@@ -95,17 +140,10 @@ async function generateResumePdf({ resume, selfDescription, jobDescription }) {
                         The resume should not be so lengthy, it should ideally be 1-2 pages long when converted to PDF. Focus on quality rather than quantity and make sure to include all the relevant information that can increase the candidate's chances of getting an interview call for the given job description.
                     `
 
-    const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: zodToJsonSchema(resumePdfSchema),
-        }
+    const jsonContent = await generateStructuredContent({
+        prompt,
+        schema: resumePdfSchema
     })
-
-
-    const jsonContent = JSON.parse(response.text)
 
     const pdfBuffer = await generatePdfFromHtml(jsonContent.html)
 

@@ -1,5 +1,5 @@
 import { getAllInterviewReports, generateInterviewReport, getInterviewReportById, generateResumePdf } from "../services/interview.api"
-import { useContext, useEffect } from "react"
+import { useContext, useEffect, useState } from "react"
 import { InterviewContext } from "../interview.context"
 import { useParams } from "react-router"
 
@@ -17,17 +17,16 @@ export const useInterview = () => {
 
     const generateReport = async ({ jobDescription, selfDescription, resumeFile }) => {
         setLoading(true)
-        let response = null
         try {
-            response = await generateInterviewReport({ jobDescription, selfDescription, resumeFile })
+            const response = await generateInterviewReport({ jobDescription, selfDescription, resumeFile })
             setReport(response.interviewReport)
+            return response.interviewReport
         } catch (error) {
-            console.log(error)
+            const message = error?.response?.data?.message || "Failed to generate interview plan."
+            throw new Error(message)
         } finally {
             setLoading(false)
         }
-
-        return response.interviewReport
     }
 
     const getReportById = async (interviewId) => {
@@ -59,22 +58,36 @@ export const useInterview = () => {
         return response.interviewReports
     }
 
+    const [ downloadingResume, setDownloadingResume ] = useState(false)
+
     const getResumePdf = async (interviewReportId) => {
-        setLoading(true)
-        let response = null
+        setDownloadingResume(true)
         try {
-            response = await generateResumePdf({ interviewReportId })
-            const url = window.URL.createObjectURL(new Blob([ response ], { type: "application/pdf" }))
+            const response = await generateResumePdf({ interviewReportId })
+
+            // Handle blob error response if server returns JSON error
+            if (response instanceof Blob && response.type.includes("application/json")) {
+                const text = await response.text()
+                let parsed = {}
+                try { parsed = JSON.parse(text) } catch (e) {}
+                alert(parsed.message || "Resume is currently unavailable.")
+                return
+            }
+
+            const blob = new Blob([ response ], { type: "application/pdf" })
+            const url = window.URL.createObjectURL(blob)
             const link = document.createElement("a")
             link.href = url
             link.setAttribute("download", `resume_${interviewReportId}.pdf`)
             document.body.appendChild(link)
             link.click()
-        }
-        catch (error) {
-            console.log(error)
+            link.remove()
+            window.URL.revokeObjectURL(url)
+        } catch (error) {
+            console.error("Resume download error:", error)
+            alert("Resume is currently unavailable. Please try again.")
         } finally {
-            setLoading(false)
+            setDownloadingResume(false)
         }
     }
 
@@ -86,6 +99,6 @@ export const useInterview = () => {
         }
     }, [ interviewId ])
 
-    return { loading, report, reports, generateReport, getReportById, getReports, getResumePdf }
+    return { loading, downloadingResume, report, reports, generateReport, getReportById, getReports, getResumePdf }
 
 }

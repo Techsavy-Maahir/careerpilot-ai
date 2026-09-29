@@ -13,8 +13,11 @@ export const generateInterviewReport = async ({ jobDescription, selfDescription,
 
     const formData = new FormData()
     formData.append("jobDescription", jobDescription)
-    formData.append("selfDescription", selfDescription)
-    formData.append("resume", resumeFile)
+    formData.append("selfDescription", selfDescription || "")
+
+    if (resumeFile) {
+        formData.append("resume", resumeFile)
+    }
 
     const response = await api.post("/api/interview/", formData, {
         headers: {
